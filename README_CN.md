@@ -18,7 +18,7 @@
 [使用手册](https://krsmt.notion.site/cli-doc)
 
 > [!WARNING]
-> 2026-05-12 之前的登录方式已被弃用。使用 `pip install -U xmu-rollcall-cli` 更新到最新版本。
+> 2026-05-12 之前的登录方式已被弃用。使用 `pip install -U xmulogin` 更新相关组件到最新版本。
 
 ## 快速开始
 

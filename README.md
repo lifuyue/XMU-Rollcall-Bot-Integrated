@@ -16,7 +16,7 @@
 [简体中文](README_CN.md)
 
 > [!WARNING]
-> 2026-05-12 Previous login method has been deprecated. Update with `pip install -U xmu-rollcall-cli` to get the latest version.
+> 2026-05-12 Previous login method has been deprecated. Update with `pip install -U xmulogin` to get the latest version.
 
 ## Install
 
