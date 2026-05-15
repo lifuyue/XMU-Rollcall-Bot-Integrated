@@ -18,7 +18,9 @@
 > [!WARNING]
 > 2026-05-12 Previous login method has been deprecated. Update with `pip install -U xmulogin` to get the latest version.
 >
-> 2026-05-15 New issue with login process. Stay tuned for updates.
+> 2026-05-15 ~New issue with login process. Stay tuned for updates.~
+>
+> 2026-05-15 Downgrade `xmulogin` with `pip install xmulogin==1.0.0` to fix it.
 
 ## Install
 
