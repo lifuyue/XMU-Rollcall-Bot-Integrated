@@ -3,23 +3,29 @@ from .notifier import build_notifier
 from .qr_handler import handle_qr_rollcall
 from .verify import send_code, send_radar
 
-def process_rollcalls(data, session):
+def process_rollcalls(data, session, account=None):
     """处理签到数据"""
     data_empty = {'rollcalls': []}
-    result = handle_rollcalls(data, session)
+    result = handle_rollcalls(data, session, account=account)
     if False in result:
         return data_empty
     else:
         return data
 
-def extract_rollcalls(data):
+def extract_rollcalls(data, account=None):
     """提取签到信息"""
     rollcalls = data['rollcalls']
     result = []
+    account_info = {}
+    if account:
+        account_info = {
+            "account_id": account.get("id"),
+            "account_name": account.get("name") or account.get("username"),
+        }
     if rollcalls:
         rollcall_count = len(rollcalls)
         for rollcall in rollcalls:
-            result.append({
+            item = {
                 'course_title': rollcall['course_title'],
                 'created_by_name': rollcall['created_by_name'],
                 'department_name': rollcall['department_name'],
@@ -30,14 +36,16 @@ def extract_rollcalls(data):
                 'rollcall_status': rollcall['rollcall_status'],
                 'scored': rollcall['scored'],
                 'status': rollcall['status']
-            })
+            }
+            item.update(account_info)
+            result.append(item)
     else:
         rollcall_count = 0
     return rollcall_count, result
 
-def handle_rollcalls(data, session):
+def handle_rollcalls(data, session, account=None):
     """处理签到流程"""
-    count, rollcalls = extract_rollcalls(data)
+    count, rollcalls = extract_rollcalls(data, account=account)
     answer_status = [False for _ in range(count)]
     notifier = build_notifier()
 

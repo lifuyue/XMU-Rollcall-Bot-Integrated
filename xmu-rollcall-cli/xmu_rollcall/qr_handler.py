@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import uuid
 from queue import Empty
@@ -22,6 +23,7 @@ mobile_headers = {
 }
 
 _server = None
+_server_lock = threading.Lock()
 
 # QR payload parser adapted from:
 # https://github.com/KrsMt-0113/XMU-Rollcall-bot_qrCode/blob/main/qrRollcall/parse_code.py
@@ -263,12 +265,17 @@ def submit_qr_rollcall(session, payload):
 
 def _get_server(qr_config):
     global _server
-    if _server is None:
-        from .qr_server import QRServer
+    if _server is not None:
+        _server.start()
+        return _server
 
-        _server = QRServer(
-            port=qr_config["flask_port"],
-            ngrok_token=qr_config["ngrok_token"],
-        )
+    with _server_lock:
+        if _server is None:
+            from .qr_server import QRServer
+
+            _server = QRServer(
+                port=qr_config["flask_port"],
+                ngrok_token=qr_config["ngrok_token"],
+            )
     _server.start()
     return _server

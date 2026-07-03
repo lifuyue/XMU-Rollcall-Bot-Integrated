@@ -20,6 +20,15 @@ class BaseNotifier:
     def send(self, title, message):
         raise NotImplementedError
 
+    def _account_line(self, rollcall):
+        account_name = rollcall.get("account_name")
+        account_id = rollcall.get("account_id")
+        if account_name and account_id is not None:
+            return f"Account: {account_name} (ID: {account_id})\n"
+        if account_name:
+            return f"Account: {account_name}\n"
+        return ""
+
     def send_rollcall_success(self, rollcall, rollcall_type):
         course = rollcall.get("course_title") or "Unknown course"
         department = rollcall.get("department_name") or "Unknown department"
@@ -28,6 +37,7 @@ class BaseNotifier:
         finished_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         message = (
             "XMU rollcall answered successfully\n"
+            f"{self._account_line(rollcall)}"
             f"Type: {rollcall_type}\n"
             f"Course: {course}\n"
             f"Created by: {department} {teacher}\n"
@@ -46,6 +56,7 @@ class BaseNotifier:
         )
         message = (
             "XMU QR rollcall detected\n"
+            f"{self._account_line(rollcall)}"
             f"Course: {course}\n"
             f"Created by: {department} {teacher}\n"
             f"Scan link: {scan_url}\n"

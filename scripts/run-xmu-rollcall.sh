@@ -32,11 +32,9 @@ try:
 except Exception:
     sys.exit(1)
 
-current_id = data.get("current_account_id")
 for account in data.get("accounts") or []:
     if (
-        account.get("id") == current_id
-        and account.get("username")
+        account.get("username")
         and account.get("password")
     ):
         sys.exit(0)
@@ -44,8 +42,8 @@ for account in data.get("accounts") or []:
 sys.exit(1)
 PY
 do
-  echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for account config at $CONFIG_FILE. Run: $PROJECT_ROOT/.venv/bin/xmu config"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for account config at $CONFIG_FILE. Run: $PROJECT_ROOT/.venv/bin/xmu add-account"
   sleep 60
 done
 
-exec "$PYTHON" -m xmu_rollcall.cli start
+exec "$PYTHON" -m xmu_rollcall.cli start-all

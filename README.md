@@ -31,15 +31,17 @@ pip install xmu-rollcall-cli
 ## Usage
 
 ```bash
-xmu config  # configure your account. support multiple accounts.
-xmu switch  # switch between accounts.
-xmu start   # start the monitor.
+xmu add-account  # add one account quickly.
+xmu config       # manage accounts.
+xmu start        # monitor the current account.
+xmu start-all    # monitor all configured accounts.
 ```
 
 ## Features
 
 - XMU unified-auth login with cached session cookies.
 - 1-second polling against `https://lnt.xmu.edu.cn/api/radar/rollcalls`.
+- Multi-account monitoring in one process.
 - Number rollcall answering.
 - Radar rollcall answering.
 - Integrated QR rollcall flow with a one-time scanner link.
@@ -58,6 +60,35 @@ When a rollcall is detected, the client handles it in this order:
 6. `status == absent && !is_radar && !is_number`: QR rollcall.
 
 Successful number, radar, and QR answers all emit a success notification.
+
+## Multi-Account Monitoring
+
+Accounts are stored in the same local config file. Add several accounts with:
+
+```bash
+xmu add-account
+xmu add-account
+```
+
+Start every complete account:
+
+```bash
+xmu start-all
+```
+
+Start selected accounts only:
+
+```bash
+xmu start-all --account-id 1 --account-id 2
+```
+
+Resource model:
+
+- One Python process, not one process per account.
+- One lightweight thread and one `requests.Session` per account.
+- Independent cookie cache per account: `<account_id>.json`.
+- Default polling is 1 second per account, with staggered thread starts to reduce request bursts.
+- The QR scanner service remains lazy and shared; it starts only when a QR rollcall is detected.
 
 ## QR and Telegram Configuration
 
@@ -101,7 +132,7 @@ QR flow:
 
 This local workspace includes LaunchAgent helper scripts:
 
-- `scripts/run-xmu-rollcall.sh`
+- `scripts/run-xmu-rollcall.sh` (runs `xmu start-all` by default)
 - `scripts/com.lifuyue.xmu-rollcall.plist`
 - `scripts/install-launch-agent.sh`
 

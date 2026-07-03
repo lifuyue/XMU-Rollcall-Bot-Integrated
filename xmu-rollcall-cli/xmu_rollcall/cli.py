@@ -8,6 +8,7 @@ from .config import (
     get_account_by_id, CONFIG_FILE, delete_account, perform_account_deletion
 )
 from .monitor import start_monitor, base_url, headers
+from .multi_monitor import is_account_complete, start_multi_account_monitor
 
 # ANSI Color codes
 class Colors:
@@ -28,10 +29,51 @@ def cli(ctx):
         click.echo(f"{Colors.OKCYAN}{Colors.BOLD}XMU Rollcall Bot CLI v{__version__}{Colors.ENDC}")
         click.echo(f"\nUsage:")
         click.echo(f"  xmu config    Configure credentials and add accounts")
+        click.echo(f"  xmu add-account Add one account quickly")
         click.echo(f"  xmu switch    Switch between accounts")
         click.echo(f"  xmu start     Start monitoring rollcalls")
+        click.echo(f"  xmu start-all Start monitoring all configured accounts")
         click.echo(f"  xmu refresh   Refresh the login status")
         click.echo(f"  xmu --help    Show this message")
+
+def add_account_interactive(current_config):
+    """添加新账号"""
+    click.echo(f"{Colors.BOLD}Adding a new account...{Colors.ENDC}\n")
+
+    username = click.prompt(f"{Colors.BOLD}Username{Colors.ENDC}")
+    password = click.prompt(f"{Colors.BOLD}Password{Colors.ENDC}", hide_input=True)
+
+    click.echo(f"\n{Colors.OKCYAN}Validating credentials...{Colors.ENDC}")
+    try:
+        session = xmulogin(type=3, username=username, password=password)
+        if session:
+            click.echo(f"{Colors.OKGREEN}✓ Login successful!{Colors.ENDC}")
+
+            click.echo(f"{Colors.OKCYAN}Fetching user profile...{Colors.ENDC}")
+            try:
+                profile = session.get(f"{base_url}/api/profile", headers=headers).json()
+                name = profile.get("name", "")
+                click.echo(f"{Colors.OKGREEN}✓ Welcome, {name}!{Colors.ENDC}")
+            except Exception:
+                click.echo(f"{Colors.WARNING}⚠ Could not fetch profile, using username as name{Colors.ENDC}")
+                name = username
+
+            try:
+                account_id = add_account(current_config, username, password, name)
+                save_config(current_config)
+
+                click.echo(f"{Colors.OKGREEN}✓ Account added successfully! (ID: {account_id}){Colors.ENDC}")
+                click.echo(f"{Colors.GRAY}Configuration file: {CONFIG_FILE}{Colors.ENDC}\n")
+                return True
+            except RuntimeError as e:
+                click.echo(f"{Colors.FAIL}✗ Failed to save configuration: {str(e)}{Colors.ENDC}")
+                click.echo(f"{Colors.WARNING}Tip: In sandboxed environments (like a-Shell), set environment variable:{Colors.ENDC}")
+                click.echo(f"  export XMU_ROLLCALL_CONFIG_DIR=~/Documents/.xmu_rollcall")
+        else:
+            click.echo(f"{Colors.FAIL}✗ Login failed. Please check your credentials.{Colors.ENDC}")
+    except Exception as e:
+        click.echo(f"{Colors.FAIL}✗ Error during login validation: {str(e)}{Colors.ENDC}")
+    return False
 
 @cli.command()
 def config():
@@ -52,47 +94,6 @@ def config():
             click.echo()
         else:
             click.echo(f"{Colors.GRAY}No accounts configured.{Colors.ENDC}\n")
-
-    def add_new_account():
-        """添加新账号"""
-        click.echo(f"{Colors.BOLD}Adding a new account...{Colors.ENDC}\n")
-
-        # 输入新账号信息
-        username = click.prompt(f"{Colors.BOLD}Username{Colors.ENDC}")
-        password = click.prompt(f"{Colors.BOLD}Password{Colors.ENDC}", hide_input=False)
-
-        # 验证登录
-        click.echo(f"\n{Colors.OKCYAN}Validating credentials...{Colors.ENDC}")
-        try:
-            session = xmulogin(type=3, username=username, password=password)
-            if session:
-                click.echo(f"{Colors.OKGREEN}✓ Login successful!{Colors.ENDC}")
-
-                # 获取用户姓名
-                click.echo(f"{Colors.OKCYAN}Fetching user profile...{Colors.ENDC}")
-                try:
-                    profile = session.get(f"{base_url}/api/profile", headers=headers).json()
-                    name = profile.get("name", "")
-                    click.echo(f"{Colors.OKGREEN}✓ Welcome, {name}!{Colors.ENDC}")
-                except Exception:
-                    click.echo(f"{Colors.WARNING}⚠ Could not fetch profile, using username as name{Colors.ENDC}")
-                    name = username
-
-                # 添加账号
-                try:
-                    account_id = add_account(current_config, username, password, name)
-                    save_config(current_config)
-
-                    click.echo(f"{Colors.OKGREEN}✓ Account added successfully! (ID: {account_id}){Colors.ENDC}")
-                    click.echo(f"{Colors.GRAY}Configuration file: {CONFIG_FILE}{Colors.ENDC}\n")
-                except RuntimeError as e:
-                    click.echo(f"{Colors.FAIL}✗ Failed to save configuration: {str(e)}{Colors.ENDC}")
-                    click.echo(f"{Colors.WARNING}Tip: In sandboxed environments (like a-Shell), set environment variable:{Colors.ENDC}")
-                    click.echo(f"  export XMU_ROLLCALL_CONFIG_DIR=~/Documents/.xmu_rollcall")
-            else:
-                click.echo(f"{Colors.FAIL}✗ Login failed. Please check your credentials.{Colors.ENDC}")
-        except Exception as e:
-            click.echo(f"{Colors.FAIL}✗ Error during login validation: {str(e)}{Colors.ENDC}")
 
     def delete_existing_account():
         """删除账号"""
@@ -163,7 +164,7 @@ def config():
         click.echo()
 
         if action.lower() == 'n':
-            add_new_account()
+            add_account_interactive(current_config)
         elif action.lower() == 'd':
             delete_existing_account()
         elif action.lower() == 'q':
@@ -178,6 +179,12 @@ def config():
                 click.echo(f"\n{Colors.GRAY}You can run: {Colors.BOLD}xmu switch{Colors.ENDC} to switch between accounts")
                 click.echo(f"{Colors.GRAY}You can run: {Colors.BOLD}xmu start{Colors.ENDC} to start monitoring")
             break
+
+@cli.command("add-account")
+def add_account_command():
+    """快速添加一个账号"""
+    current_config = load_config()
+    add_account_interactive(current_config)
 
 @cli.command()
 def start():
@@ -198,6 +205,36 @@ def start():
     # 启动监控
     try:
         start_monitor(current_account)
+    except KeyboardInterrupt:
+        click.echo(f"\n{Colors.WARNING}Shutting down...{Colors.ENDC}")
+        sys.exit(0)
+    except Exception as e:
+        click.echo(f"\n{Colors.FAIL}Error: {str(e)}{Colors.ENDC}")
+        sys.exit(1)
+
+@cli.command("start-all")
+@click.option("--interval", "poll_interval", default=1.0, show_default=True, type=float, help="Polling interval per account in seconds.")
+@click.option("--account-id", "account_ids", multiple=True, type=int, help="Monitor only selected account ID(s). Repeat for multiple accounts.")
+def start_all(poll_interval, account_ids):
+    """启动所有已配置账号的签到监控"""
+    config_data = load_config()
+    accounts = [account for account in get_all_accounts(config_data) if is_account_complete(account)]
+
+    if account_ids:
+        selected = set(account_ids)
+        accounts = [account for account in accounts if account.get("id") in selected]
+
+    if not accounts:
+        click.echo(f"{Colors.FAIL}✗ No complete account configured!{Colors.ENDC}")
+        click.echo(f"Please run: {Colors.BOLD}xmu add-account{Colors.ENDC}")
+        sys.exit(1)
+
+    click.echo(f"{Colors.OKCYAN}Monitoring {len(accounts)} account(s):{Colors.ENDC}")
+    for account in accounts:
+        click.echo(f"  {account.get('id')}: {account.get('name') or account.get('username')}")
+
+    try:
+        start_multi_account_monitor(accounts, poll_interval=poll_interval)
     except KeyboardInterrupt:
         click.echo(f"\n{Colors.WARNING}Shutting down...{Colors.ENDC}")
         sys.exit(0)

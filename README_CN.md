@@ -33,16 +33,17 @@ pip install xmu-rollcall-cli
 ## 使用方法
 
 ```bash
-xmu config  # 配置账号。使用统一身份认证账号密码。
-xmu switch  # 切换账号。
-xmu start   # 启动监控。
+xmu add-account  # 快速添加一个账号。
+xmu config       # 管理账号。使用统一身份认证账号密码。
+xmu start        # 启动当前账号监控。
+xmu start-all    # 同时监控所有已配置账号。
 ```
 
 ## 当前能力
 
 - 使用 XMU 统一身份认证登录，并缓存 session cookie。
 - 每 1 秒轮询一次 `https://lnt.xmu.edu.cn/api/radar/rollcalls`。
-- 支持多账号配置和当前账号切换。
+- 支持多账号配置、当前账号切换和多账号同时监控。
 - 支持数字码签到、雷达签到。
 - 集成版支持二维码签到：检测到二维码签到后，会通过 Telegram 推送一次性扫码链接。
 - 所有成功签到方式都会发送成功反馈通知。
@@ -59,6 +60,35 @@ xmu start   # 启动监控。
 6. `status == absent && !is_radar && !is_number`：按二维码签到处理。
 
 数字码、雷达、二维码任一方式签到成功后，都会通过当前通知渠道发送成功反馈。
+
+## 多账号监控
+
+多账号配置仍然保存在同一个本地配置文件中：
+
+```bash
+xmu add-account
+xmu add-account
+```
+
+启动所有完整账号：
+
+```bash
+xmu start-all
+```
+
+只启动指定账号：
+
+```bash
+xmu start-all --account-id 1 --account-id 2
+```
+
+资源模型：
+
+- 单个 Python 进程内运行，不为每个账号复制一个进程。
+- 每个账号一个轻量线程和一个 `requests.Session`。
+- 每个账号独立 cookie 缓存，文件名为 `<account_id>.json`。
+- 默认每个账号 1 秒轮询一次；多个账号会错峰启动，降低瞬时请求尖峰。
+- 二维码扫码服务仍然懒启动且全局复用，只在检测到二维码签到时开启。
 
 ## 二维码签到与 Telegram 通知
 
@@ -109,7 +139,7 @@ chmod 600 ~/.xmu_rollcall/config.json
 
 本仓库包含本机 `launchd` 配置脚本：
 
-- `scripts/run-xmu-rollcall.sh`：实际运行包装脚本。
+- `scripts/run-xmu-rollcall.sh`：实际运行包装脚本，默认执行 `xmu start-all`。
 - `scripts/com.lifuyue.xmu-rollcall.plist`：LaunchAgent 配置。
 - `scripts/install-launch-agent.sh`：安装、启用并拉起服务。
 

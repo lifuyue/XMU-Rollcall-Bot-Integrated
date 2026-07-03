@@ -14,6 +14,7 @@ A command-line tool for monitoring and auto-answering Tronclass rollcalls at Xia
 - QR rollcalls through a one-time HTTPS scanner link
 - Notification abstraction with log output and Telegram support
 - Multi-account management in one local config
+- Multi-account monitoring in one process
 - Session cookie cache and refresh support
 
 ## Installation
@@ -35,7 +36,7 @@ After installation, these command aliases are available:
 1. Configure at least one account:
 
 ```bash
-xmu config
+xmu add-account
 ```
 
 2. (Optional) Switch active account:
@@ -44,13 +45,19 @@ xmu config
 xmu switch
 ```
 
-3. Start monitoring:
+3. Start monitoring the current account:
 
 ```bash
 xmu start
 ```
 
-4. If session becomes invalid, refresh cookies:
+4. Start monitoring every complete account:
+
+```bash
+xmu start-all
+```
+
+5. If session becomes invalid, refresh cookies:
 
 ```bash
 xmu refresh
@@ -59,8 +66,10 @@ xmu refresh
 ## Commands
 
 - `xmu config` - Add/delete accounts and set current account
+- `xmu add-account` - Add one account quickly
 - `xmu switch` - Switch the current account
 - `xmu start` - Start rollcall monitoring loop
+- `xmu start-all` - Start all configured complete accounts in one process
 - `xmu refresh` - Remove cached cookies for current account
 - `xmu --help` - Show help
 
@@ -82,6 +91,29 @@ Example (custom config directory):
 ```bash
 export XMU_ROLLCALL_CONFIG_DIR="$HOME/Documents/.xmu_rollcall"
 ```
+
+### Multi-Account Monitoring
+
+Add several accounts with:
+
+```bash
+xmu add-account
+xmu add-account
+```
+
+Start all complete accounts:
+
+```bash
+xmu start-all
+```
+
+Start selected accounts only:
+
+```bash
+xmu start-all --account-id 1 --account-id 2
+```
+
+The multi-account monitor uses one Python process, one lightweight thread per account, and one `requests.Session` per account. Each account keeps its own cookie cache as `<account_id>.json`. The default polling interval is 1 second per account, with staggered account starts to avoid request bursts. QR scanner/ngrok startup remains lazy and shared across accounts.
 
 ### QR Rollcalls
 
@@ -160,7 +192,7 @@ Successful number, radar, and QR submissions all emit success notifications.
 
 This workspace includes helper scripts for local persistent execution on macOS:
 
-- `scripts/run-xmu-rollcall.sh`
+- `scripts/run-xmu-rollcall.sh` (runs `xmu start-all` by default)
 - `scripts/com.lifuyue.xmu-rollcall.plist`
 - `scripts/install-launch-agent.sh`
 
