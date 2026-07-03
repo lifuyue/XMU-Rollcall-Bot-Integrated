@@ -144,6 +144,75 @@ def is_config_complete(config):
     required_fields = ["username", "password"]
     return all(current_account.get(field) for field in required_fields)
 
+def _env_value(name):
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return None
+    return value
+
+def _parse_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+def _parse_int(value, default):
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+def get_qr_config(config=None):
+    """获取二维码签到配置，环境变量优先。"""
+    if config is None:
+        config = load_config()
+    qr_config = dict(config.get("qr") or {})
+
+    enabled_env = _env_value("XMU_ROLLCALL_QR_ENABLED")
+    token_env = _env_value("XMU_ROLLCALL_NGROK_TOKEN")
+    timeout_env = _env_value("XMU_ROLLCALL_QR_SESSION_TIMEOUT")
+    port_env = _env_value("XMU_ROLLCALL_QR_FLASK_PORT")
+
+    return {
+        "enabled": _parse_bool(enabled_env, _parse_bool(qr_config.get("enabled"), False)),
+        "ngrok_token": token_env or qr_config.get("ngrok_token") or "",
+        "session_timeout": _parse_int(timeout_env, _parse_int(qr_config.get("session_timeout"), 180)),
+        "flask_port": _parse_int(port_env, _parse_int(qr_config.get("flask_port"), 5001)),
+    }
+
+def get_notification_config(config=None):
+    """获取通知配置，环境变量优先。"""
+    if config is None:
+        config = load_config()
+    notification_config = dict(config.get("notification") or {})
+
+    provider = (
+        _env_value("XMU_ROLLCALL_NOTIFICATION_PROVIDER")
+        or notification_config.get("provider")
+        or "log"
+    )
+    telegram_bot_token = (
+        _env_value("XMU_ROLLCALL_TELEGRAM_BOT_TOKEN")
+        or notification_config.get("telegram_bot_token")
+        or ""
+    )
+    telegram_chat_id = (
+        _env_value("XMU_ROLLCALL_TELEGRAM_CHAT_ID")
+        or notification_config.get("telegram_chat_id")
+        or ""
+    )
+
+    return {
+        "provider": str(provider).strip().lower(),
+        "telegram_bot_token": telegram_bot_token,
+        "telegram_chat_id": telegram_chat_id,
+    }
+
 def get_cookies_path(account_id=None):
     """获取cookies文件路径，根据账号ID命名"""
     ensure_config_dir()
@@ -226,4 +295,3 @@ def perform_account_deletion(cookies_to_delete, cookies_to_rename):
             if os.path.exists(new_path):
                 os.remove(new_path)
             os.rename(old_path, new_path)
-

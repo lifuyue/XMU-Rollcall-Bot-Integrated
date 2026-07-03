@@ -38,6 +38,8 @@ dependencies = [
     "xmulogin",
     "click>=8.1.0",
     "aiohttp>=3.9.0",
+    "Flask>=3.0.0",
+    "pyngrok>=7.0.0",
 ]
 
 [project.urls]
@@ -58,4 +60,4 @@ packages = ["xmu_rollcall"]
 version = {attr = "xmu_rollcall.__version__"}
 
 [tool.setuptools.package-data]
-xmu_rollcall = ["py.typed"]
+xmu_rollcall = ["py.typed", "templates/*.html"]

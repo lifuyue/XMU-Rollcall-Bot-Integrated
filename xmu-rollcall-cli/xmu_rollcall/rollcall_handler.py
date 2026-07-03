@@ -1,4 +1,6 @@
 import time
+from .notifier import build_notifier
+from .qr_handler import handle_qr_rollcall
 from .verify import send_code, send_radar
 
 def process_rollcalls(data, session):
@@ -37,6 +39,7 @@ def handle_rollcalls(data, session):
     """处理签到流程"""
     count, rollcalls = extract_rollcalls(data)
     answer_status = [False for _ in range(count)]
+    notifier = build_notifier()
 
     if count:
         print(time.strftime("%H:%M:%S", time.localtime()), f"New rollcall(s) found!\n")
@@ -52,22 +55,37 @@ def handle_rollcalls(data, session):
                 temp_str = "QRcode rollcall"
             print(f"Rollcall type: {temp_str}\n")
 
-            if (rollcalls[i]['status'] == 'absent') & (rollcalls[i]['is_number']) & (not rollcalls[i]['is_radar']):
-                if send_code(session, rollcalls[i]['rollcall_id']):
-                    answer_status[i] = True
-                else:
-                    print("Answering failed.")
-            elif rollcalls[i]['status'] == 'on_call_fine':
+            if rollcalls[i]['status'] == 'on_call_fine':
                 print("Already answered.")
+                answer_status[i] = True
+            elif rollcalls[i]['is_expired']:
+                print("Rollcall is expired.")
+                answer_status[i] = True
+            elif rollcalls[i]['status'] != 'absent':
+                print(f"Rollcall status is {rollcalls[i]['status']}; no answer attempt needed.")
                 answer_status[i] = True
             elif rollcalls[i]['is_radar']:
                 if send_radar(session, rollcalls[i]['rollcall_id']):
                     answer_status[i] = True
+                    _notify_success(notifier, rollcalls[i], "Radar")
+                else:
+                    print("Answering failed.")
+            elif rollcalls[i]['is_number']:
+                if send_code(session, rollcalls[i]['rollcall_id']):
+                    answer_status[i] = True
+                    _notify_success(notifier, rollcalls[i], "Number")
                 else:
                     print("Answering failed.")
             else:
-                # TODO: qrcode rollcall
-                print("Answering failed. QRcode rollcall not supported yet.")
+                if handle_qr_rollcall(session, rollcalls[i]):
+                    answer_status[i] = True
+                    _notify_success(notifier, rollcalls[i], "QRcode")
+                else:
+                    print("Answering failed. QRcode rollcall was not completed.")
 
     return answer_status
 
+def _notify_success(notifier, rollcall, rollcall_type):
+    result = notifier.send_rollcall_success(rollcall, rollcall_type)
+    if not result.ok:
+        print(f"[Notification] Success feedback failed: {result.message}")

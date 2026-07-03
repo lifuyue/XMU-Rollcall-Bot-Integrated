@@ -40,7 +40,12 @@ setup(
         "xmulogin",
         "click>=8.1.0",
         "aiohttp>=3.9.0",
+        "Flask>=3.0.0",
+        "pyngrok>=7.0.0",
     ],
+    package_data={
+        "xmu_rollcall": ["templates/*.html"],
+    },
 
     # Entry points
     entry_points={

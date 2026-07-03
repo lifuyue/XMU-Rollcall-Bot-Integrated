@@ -2,3 +2,9 @@
 /.venv/
 /.idea/
 legacy/v3.0.1/info.txt
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+.xmu_rollcall/
+*.log

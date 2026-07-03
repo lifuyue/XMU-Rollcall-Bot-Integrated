@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>XMU QR Rollcall Scanner</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #102033;
+      background: #f4f7fb;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px;
+      color: #fff;
+      background: #1769aa;
+      text-align: center;
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    main {
+      flex: 1;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+    }
+
+    .scanner {
+      position: relative;
+      width: min(100%, 420px);
+      aspect-ratio: 1;
+      overflow: hidden;
+      border: 3px solid #1769aa;
+      border-radius: 10px;
+      background: #0d1b2a;
+      box-shadow: 0 12px 28px rgba(23, 105, 170, 0.18);
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .line {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      height: 3px;
+      background: #48cae4;
+      box-shadow: 0 0 12px #48cae4;
+      animation: scan 2s linear infinite;
+    }
+
+    @keyframes scan {
+      0% { top: 12%; }
+      50% { top: 86%; }
+      100% { top: 12%; }
+    }
+
+    .corner {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      border-color: #48cae4;
+      border-style: solid;
+      border-width: 0;
+    }
+
+    .tl { top: 12px; left: 12px; border-top-width: 4px; border-left-width: 4px; }
+    .tr { top: 12px; right: 12px; border-top-width: 4px; border-right-width: 4px; }
+    .bl { bottom: 12px; left: 12px; border-bottom-width: 4px; border-left-width: 4px; }
+    .br { bottom: 12px; right: 12px; border-bottom-width: 4px; border-right-width: 4px; }
+
+    #canvas {
+      display: none;
+    }
+
+    #message {
+      min-height: 62px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: #fff;
+      background: #1769aa;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    #message.success {
+      background: #2e7d32;
+    }
+
+    #message.error {
+      background: #c62828;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      margin-right: 10px;
+      border: 3px solid rgba(255, 255, 255, 0.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      flex: 0 0 auto;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <header>对准二维码，识别后自动回传</header>
+  <main>
+    <section class="scanner">
+      <video id="video" autoplay playsinline></video>
+      <div class="line"></div>
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+    </section>
+  </main>
+  <canvas id="canvas"></canvas>
+  <div id="message"><span class="spinner"></span>正在启动相机...</div>
+
+  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+  <script>
+    const sid = "{{ sid }}";
+    const submitUrl = "/submit/" + sid;
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const message = document.getElementById("message");
+    let submitted = false;
+
+    function setMessage(text, state) {
+      message.innerHTML = text;
+      message.classList.remove("success", "error");
+      if (state) message.classList.add(state);
+    }
+
+    function stopCamera() {
+      const stream = video.srcObject;
+      if (stream) stream.getTracks().forEach(track => track.stop());
+    }
+
+    async function submitQr(text) {
+      submitted = true;
+      stopCamera();
+      setMessage('<span class="spinner"></span>已识别，正在提交...', null);
+      try {
+        const response = await fetch(submitUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.message || "提交失败");
+        }
+        setMessage(data.message || "二维码已回传，可以关闭页面。", "success");
+      } catch (error) {
+        submitted = false;
+        setMessage("提交失败：" + error.message, "error");
+      }
+    }
+
+    function tick() {
+      if (submitted) return;
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(image.data, image.width, image.height);
+        if (code && code.data) {
+          submitQr(code.data);
+          return;
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+
+    async function start() {
+      try {
+        if (!window.jsQR) {
+          throw new Error("二维码识别库加载失败，请刷新页面。");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        });
+        video.srcObject = stream;
+        setMessage("请对准二维码扫描", null);
+        requestAnimationFrame(tick);
+      } catch (error) {
+        setMessage("无法访问相机：" + error.message, "error");
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>

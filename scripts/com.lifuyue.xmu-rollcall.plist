@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lifuyue.xmu-rollcall</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/lifuyue/Projects/XMU-Rollcall-Bot/scripts/run-xmu-rollcall.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/lifuyue/Projects/XMU-Rollcall-Bot/xmu-rollcall-cli</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>TERM</key>
+    <string>xterm-256color</string>
+    <key>XMU_ROLLCALL_CONFIG_DIR</key>
+    <string>/Users/lifuyue/.xmu_rollcall</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/lifuyue/.xmu_rollcall/logs/launchd.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/lifuyue/.xmu_rollcall/logs/launchd.err.log</string>
+</dict>
+</plist>
