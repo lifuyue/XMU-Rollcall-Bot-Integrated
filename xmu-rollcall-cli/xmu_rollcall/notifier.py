@@ -121,6 +121,15 @@ def build_notifier(config=None):
             print(f"[Notification] Telegram disabled: {exc}. Falling back to log output.")
             return LogNotifier()
 
+    if provider == "wechat":
+        try:
+            from .wechat_notifier import WeChatNotifier
+
+            return WeChatNotifier(notification_config.get("wechat"))
+        except NotificationError as exc:
+            print(f"[Notification] WeChat disabled: {exc}. Falling back to log output.")
+            return LogNotifier()
+
     if provider not in {"log", "none", ""}:
         print(f"[Notification] Unknown provider '{provider}'. Falling back to log output.")
     return LogNotifier()

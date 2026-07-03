@@ -190,6 +190,7 @@ def get_notification_config(config=None):
     if config is None:
         config = load_config()
     notification_config = dict(config.get("notification") or {})
+    wechat_config = dict(notification_config.get("wechat") or {})
 
     provider = (
         _env_value("XMU_ROLLCALL_NOTIFICATION_PROVIDER")
@@ -207,10 +208,46 @@ def get_notification_config(config=None):
         or ""
     )
 
+    wechat_enabled_env = _env_value("XMU_ROLLCALL_WECHAT_ENABLED")
+    wechat_cred_path = (
+        _env_value("XMU_ROLLCALL_WECHAT_CRED_PATH")
+        or wechat_config.get("cred_path")
+        or str(CONFIG_DIR / "wechatbot-credentials.json")
+    )
+    wechat_state_path = (
+        _env_value("XMU_ROLLCALL_WECHAT_STATE_PATH")
+        or wechat_config.get("state_path")
+        or str(CONFIG_DIR / "wechat_state.json")
+    )
+    wechat_send_timeout = (
+        _env_value("XMU_ROLLCALL_WECHAT_SEND_TIMEOUT")
+        or wechat_config.get("send_timeout")
+    )
+    wechat_bind_timeout = (
+        _env_value("XMU_ROLLCALL_WECHAT_BIND_TIMEOUT")
+        or wechat_config.get("bind_timeout")
+    )
+    wechat_bot_agent = (
+        _env_value("XMU_ROLLCALL_WECHAT_BOT_AGENT")
+        or wechat_config.get("bot_agent")
+        or "XMU-Rollcall-Bot/0.1"
+    )
+
     return {
         "provider": str(provider).strip().lower(),
         "telegram_bot_token": telegram_bot_token,
         "telegram_chat_id": telegram_chat_id,
+        "wechat": {
+            "enabled": _parse_bool(
+                wechat_enabled_env,
+                _parse_bool(wechat_config.get("enabled"), False),
+            ),
+            "cred_path": str(Path(wechat_cred_path).expanduser()),
+            "state_path": str(Path(wechat_state_path).expanduser()),
+            "send_timeout": _parse_int(wechat_send_timeout, 15),
+            "bind_timeout": _parse_int(wechat_bind_timeout, 300),
+            "bot_agent": str(wechat_bot_agent),
+        },
     }
 
 def get_cookies_path(account_id=None):

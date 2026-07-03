@@ -42,6 +42,7 @@ setup(
         "aiohttp>=3.9.0",
         "Flask>=3.0.0",
         "pyngrok>=7.0.0",
+        "wechatbot-sdk; python_version >= '3.9'",
     ],
     package_data={
         "xmu_rollcall": ["templates/*.html"],

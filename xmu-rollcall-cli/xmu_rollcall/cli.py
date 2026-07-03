@@ -5,7 +5,8 @@ from . import __version__
 from .config import (
     load_config, save_config, is_config_complete, get_cookies_path,
     add_account, get_all_accounts, get_current_account, set_current_account,
-    get_account_by_id, CONFIG_FILE, delete_account, perform_account_deletion
+    get_account_by_id, CONFIG_FILE, delete_account, perform_account_deletion,
+    get_notification_config,
 )
 from .monitor import start_monitor, base_url, headers
 from .multi_monitor import is_account_complete, start_multi_account_monitor
@@ -33,6 +34,9 @@ def cli(ctx):
         click.echo(f"  xmu switch    Switch between accounts")
         click.echo(f"  xmu start     Start monitoring rollcalls")
         click.echo(f"  xmu start-all Start monitoring all configured accounts")
+        click.echo(f"  xmu wechat-login Login WeChat notifier by QR scan")
+        click.echo(f"  xmu wechat-bind Bind a target WeChat chat for notifications")
+        click.echo(f"  xmu wechat-test Send a WeChat notification test")
         click.echo(f"  xmu refresh   Refresh the login status")
         click.echo(f"  xmu --help    Show this message")
 
@@ -311,6 +315,60 @@ def switch():
         click.echo(f"{Colors.GRAY}You can now run: {Colors.BOLD}xmu start{Colors.ENDC}")
     else:
         click.echo(f"{Colors.FAIL}✗ Account not found!{Colors.ENDC}")
+        sys.exit(1)
+
+
+def _get_wechat_config():
+    config_data = load_config()
+    return get_notification_config(config_data).get("wechat") or {}
+
+
+@cli.command("wechat-login")
+@click.option("--force", is_flag=True, help="Ignore existing WeChat credentials and scan again.")
+def wechat_login(force):
+    """扫码登录微信通知机器人并保存凭证"""
+    from .wechat_notifier import run_wechat_login
+
+    try:
+        run_wechat_login(_get_wechat_config(), force=force)
+        click.echo(f"{Colors.OKGREEN}✓ WeChat login completed.{Colors.ENDC}")
+    except KeyboardInterrupt:
+        click.echo(f"\n{Colors.WARNING}WeChat login cancelled.{Colors.ENDC}")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"{Colors.FAIL}✗ WeChat login failed: {str(e)}{Colors.ENDC}")
+        sys.exit(1)
+
+
+@cli.command("wechat-bind")
+def wechat_bind():
+    """等待目标微信群任意消息并保存主动发送上下文"""
+    from .wechat_notifier import run_wechat_bind
+
+    click.echo("After this command starts, send any message in the target WeChat chat.")
+    click.echo("The bot will only save the chat context and will not reply.")
+    try:
+        run_wechat_bind(_get_wechat_config())
+        click.echo(f"{Colors.OKGREEN}✓ WeChat target chat bound.{Colors.ENDC}")
+    except KeyboardInterrupt:
+        click.echo(f"\n{Colors.WARNING}WeChat bind cancelled.{Colors.ENDC}")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"{Colors.FAIL}✗ WeChat bind failed: {str(e)}{Colors.ENDC}")
+        sys.exit(1)
+
+
+@cli.command("wechat-test")
+@click.option("--text", default=None, help="Custom test message text.")
+def wechat_test(text):
+    """向已绑定微信群发送测试消息"""
+    from .wechat_notifier import run_wechat_test
+
+    result = run_wechat_test(_get_wechat_config(), text=text)
+    if result.ok:
+        click.echo(f"{Colors.OKGREEN}✓ WeChat test completed: {result.message}{Colors.ENDC}")
+    else:
+        click.echo(f"{Colors.FAIL}✗ WeChat test failed: {result.message}{Colors.ENDC}")
         sys.exit(1)
 
 
