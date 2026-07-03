@@ -1,5 +1,9 @@
 import click
 import sys
+from .network import configure_network
+
+configure_network()
+
 from xmulogin import xmulogin
 from . import __version__
 from .config import (

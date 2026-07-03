@@ -40,7 +40,7 @@ def load_session(sess: requests.Session, path: str):
 def verify_session(sess: requests.Session) -> dict:
     """验证session是否有效"""
     try:
-        resp = sess.get(f"{base_url}/api/profile", headers=headers)
+        resp = sess.get(f"{base_url}/api/profile", headers=headers, timeout=20)
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, dict) and "name" in data:
@@ -48,4 +48,3 @@ def verify_session(sess: requests.Session) -> dict:
     except Exception:
         pass
     return {}
-
