@@ -190,6 +190,7 @@ def get_notification_config(config=None):
     if config is None:
         config = load_config()
     notification_config = dict(config.get("notification") or {})
+    feishu_config = dict(notification_config.get("feishu") or {})
     wechat_config = dict(notification_config.get("wechat") or {})
 
     provider = (
@@ -206,6 +207,23 @@ def get_notification_config(config=None):
         _env_value("XMU_ROLLCALL_TELEGRAM_CHAT_ID")
         or notification_config.get("telegram_chat_id")
         or ""
+    )
+    feishu_webhook_url = (
+        _env_value("XMU_ROLLCALL_FEISHU_WEBHOOK_URL")
+        or notification_config.get("feishu_webhook_url")
+        or feishu_config.get("webhook_url")
+        or ""
+    )
+    feishu_sign_secret = (
+        _env_value("XMU_ROLLCALL_FEISHU_SIGN_SECRET")
+        or notification_config.get("feishu_sign_secret")
+        or feishu_config.get("sign_secret")
+        or ""
+    )
+    feishu_timeout = (
+        _env_value("XMU_ROLLCALL_FEISHU_TIMEOUT")
+        or notification_config.get("feishu_timeout")
+        or feishu_config.get("timeout")
     )
 
     wechat_enabled_env = _env_value("XMU_ROLLCALL_WECHAT_ENABLED")
@@ -237,6 +255,13 @@ def get_notification_config(config=None):
         "provider": str(provider).strip().lower(),
         "telegram_bot_token": telegram_bot_token,
         "telegram_chat_id": telegram_chat_id,
+        "feishu_webhook_url": feishu_webhook_url,
+        "feishu_sign_secret": feishu_sign_secret,
+        "feishu": {
+            "webhook_url": feishu_webhook_url,
+            "sign_secret": feishu_sign_secret,
+            "timeout": _parse_int(feishu_timeout, 10),
+        },
         "wechat": {
             "enabled": _parse_bool(
                 wechat_enabled_env,

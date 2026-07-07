@@ -12,7 +12,7 @@ A command-line tool for monitoring and auto-answering Tronclass rollcalls at Xia
   - Number rollcalls (fetch number code and answer directly)
   - Radar rollcalls (location solving)
 - QR rollcalls through a one-time HTTPS scanner link
-- Notification abstraction with log output and Telegram support
+- Notification abstraction with log, Telegram, Feishu, and WeChat support
 - Multi-account management in one local config
 - Multi-account monitoring in one process
 - Session cookie cache and refresh support
@@ -146,8 +146,10 @@ Supported providers:
 
 - `log`: print notifications to stdout.
 - `telegram`: send notifications through Telegram Bot API.
+- `feishu`: send notifications through a Feishu custom bot webhook.
+- `wechat`: send notifications through the WeChat notifier.
 
-Example:
+Telegram example:
 
 ```json
 {
@@ -159,6 +161,20 @@ Example:
 }
 ```
 
+Feishu custom bot example:
+
+```json
+{
+  "notification": {
+    "provider": "feishu",
+    "feishu_webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_WEBHOOK_ID",
+    "feishu_sign_secret": "YOUR_FEISHU_SIGN_SECRET"
+  }
+}
+```
+
+`feishu_sign_secret` is optional. Set it only when signature verification is enabled for the Feishu custom bot.
+
 Environment variable overrides are supported:
 
 - `XMU_ROLLCALL_QR_ENABLED`
@@ -168,6 +184,9 @@ Environment variable overrides are supported:
 - `XMU_ROLLCALL_NOTIFICATION_PROVIDER`
 - `XMU_ROLLCALL_TELEGRAM_BOT_TOKEN`
 - `XMU_ROLLCALL_TELEGRAM_CHAT_ID`
+- `XMU_ROLLCALL_FEISHU_WEBHOOK_URL`
+- `XMU_ROLLCALL_FEISHU_SIGN_SECRET`
+- `XMU_ROLLCALL_FEISHU_TIMEOUT`
 
 Do not commit local credentials. Use restrictive file permissions:
 
