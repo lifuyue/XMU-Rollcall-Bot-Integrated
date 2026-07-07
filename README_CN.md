@@ -45,7 +45,7 @@ xmu start-all    # 同时监控所有已配置账号。
 - 每 1 秒轮询一次 `https://lnt.xmu.edu.cn/api/radar/rollcalls`。
 - 支持多账号配置、当前账号切换和多账号同时监控。
 - 支持数字码签到、雷达签到。
-- 集成版支持二维码签到：检测到二维码签到后，会通过 Telegram 推送一次性扫码链接。
+- 集成版支持二维码签到：检测到二维码签到后，会通过当前通知渠道推送一次性扫码链接。
 - 所有成功签到方式都会发送成功反馈通知。
 
 ## 签到类型判断逻辑
@@ -90,7 +90,7 @@ xmu start-all --account-id 1 --account-id 2
 - 默认每个账号 1 秒轮询一次；多个账号会错峰启动，降低瞬时请求尖峰。
 - 二维码扫码服务仍然懒启动且全局复用，只在检测到二维码签到时开启。
 
-## 二维码签到与 Telegram 通知
+## 二维码签到与通知
 
 二维码签到默认关闭，需要在本机配置文件中显式开启。配置文件默认位置：
 
@@ -116,9 +116,39 @@ xmu start-all --account-id 1 --account-id 2
 }
 ```
 
+通知渠道支持：
+
+- `log`：输出到本机日志。
+- `telegram`：通过 Telegram Bot API 推送。
+- `feishu`：通过飞书群聊自定义机器人 Webhook 推送。
+- `wechat`：通过微信通知机器人推送。
+
+飞书群聊自定义机器人配置示例：
+
+```json
+{
+  "notification": {
+    "provider": "feishu",
+    "feishu_webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_WEBHOOK_ID",
+    "feishu_sign_secret": "YOUR_FEISHU_SIGN_SECRET"
+  }
+}
+```
+
+`feishu_sign_secret` 为可选项；只有在飞书自定义机器人开启签名校验时才需要填写。
+
+支持通过环境变量覆盖通知配置：
+
+- `XMU_ROLLCALL_NOTIFICATION_PROVIDER`
+- `XMU_ROLLCALL_TELEGRAM_BOT_TOKEN`
+- `XMU_ROLLCALL_TELEGRAM_CHAT_ID`
+- `XMU_ROLLCALL_FEISHU_WEBHOOK_URL`
+- `XMU_ROLLCALL_FEISHU_SIGN_SECRET`
+- `XMU_ROLLCALL_FEISHU_TIMEOUT`
+
 安全建议：
 
-- 不要把 `telegram_bot_token`、`telegram_chat_id`、`ngrok_token` 提交到 git。
+- 不要把 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url`、`feishu_sign_secret`、`ngrok_token` 提交到 git。
 - 配置完成后建议执行：
 
 ```bash
@@ -130,10 +160,10 @@ chmod 600 ~/.xmu_rollcall/config.json
 1. 监控到二维码签到。
 2. 本机懒启动 Flask 扫码服务。
 3. 使用 ngrok 暴露临时 HTTPS 链接。
-4. Telegram 推送课程名、发起人、一次性扫码链接和有效期。
+4. 当前通知渠道推送课程名、发起人、一次性扫码链接和有效期。
 5. 手机打开链接并扫描课堂二维码。
 6. 本机复用已登录 `requests.Session` 调用 `answer_qr_rollcall` 完成提交。
-7. 成功后发送 Telegram 成功反馈。
+7. 成功后发送通知反馈。
 
 ## macOS 开机自动运行
 
