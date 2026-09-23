@@ -220,6 +220,27 @@ def start():
         click.echo(f"\n{Colors.FAIL}Error: {str(e)}{Colors.ENDC}")
         sys.exit(1)
 
+
+def _prewarm_qr_server():
+    """Bring the scanner service + ngrok tunnel up at boot.
+
+    Starting it lazily spent several seconds of ngrok.connect() inside the
+    300s scan window; it also makes the diagnostic page unreachable until a
+    rollcall happens. Failure here must never stop monitoring.
+    """
+    from .config import get_qr_config, load_config
+
+    qr_config = get_qr_config(load_config())
+    if not qr_config.get("enabled") or not qr_config.get("ngrok_token"):
+        return
+    try:
+        from .qr_handler import _get_server
+
+        _get_server(qr_config)
+    except Exception as exc:
+        click.echo(f"{Colors.WARNING}[QR] Pre-warm failed ({exc}); will retry on first QR rollcall.{Colors.ENDC}")
+
+
 @cli.command("start-all")
 @click.option("--interval", "poll_interval", default=1.0, show_default=True, type=float, help="Polling interval per account in seconds.")
 @click.option("--account-id", "account_ids", multiple=True, type=int, help="Monitor only selected account ID(s). Repeat for multiple accounts.")
@@ -240,6 +261,8 @@ def start_all(poll_interval, account_ids):
     click.echo(f"{Colors.OKCYAN}Monitoring {len(accounts)} account(s):{Colors.ENDC}")
     for account in accounts:
         click.echo(f"  {account.get('id')}: {account.get('name') or account.get('username')}")
+
+    _prewarm_qr_server()
 
     try:
         start_multi_account_monitor(accounts, poll_interval=poll_interval)

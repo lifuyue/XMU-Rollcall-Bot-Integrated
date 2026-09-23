@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request
 from pyngrok import ngrok
 from werkzeug.serving import make_server
 
@@ -111,6 +111,26 @@ class QRServer:
 
             queue.put(text)
             return jsonify({"ok": True, "message": "QR code received. You can close this page."})
+
+        # --- temporary diagnostic routes (remove once the QR bug is closed) ---
+        @self._app.route("/diag")
+        def diag_page():
+            return render_template("diag.html")
+
+        @self._app.route("/diag/session")
+        def diag_session():
+            # Open the real scanner page without waiting for a rollcall. A parallel
+            # diagnostic page drifts from the one that actually runs — this tests the
+            # page students get, zoom fallback and photo button included.
+            session = self.create_session(300)
+            print(f"[QR-DIAG] test scan session {session.sid}", flush=True)
+            return redirect(f"/scan/{session.sid}")
+
+        @self._app.route("/diag/log", methods=["POST"])
+        def diag_log():
+            data = request.get_json(force=True, silent=True) or {}
+            print(f"[QR-DIAG] {data}", flush=True)
+            return jsonify({"ok": True})
 
         @self._app.route("/healthz")
         def healthz():

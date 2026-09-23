@@ -3,3 +3,4 @@ include LICENSE
 include requirements.txt
 recursive-include xmu_rollcall *.py
 recursive-include xmu_rollcall/templates *.html
+recursive-include xmu_rollcall/static *

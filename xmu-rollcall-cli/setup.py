@@ -45,7 +45,7 @@ setup(
         "wechatbot-sdk; python_version >= '3.9'",
     ],
     package_data={
-        "xmu_rollcall": ["templates/*.html"],
+        "xmu_rollcall": ["templates/*.html", "static/*"],
     },
 
     # Entry points

@@ -61,4 +61,4 @@ packages = ["xmu_rollcall"]
 version = {attr = "xmu_rollcall.__version__"}
 
 [tool.setuptools.package-data]
-xmu_rollcall = ["py.typed", "templates/*.html"]
+xmu_rollcall = ["py.typed", "templates/*.html", "static/*"]

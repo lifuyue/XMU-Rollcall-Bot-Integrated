@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>QR 扫码诊断 v2</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+           background:#0d1b2a; color:#e8f1f8; }
+    header { padding:10px; background:#1769aa; text-align:center; font-weight:600; font-size:14px; }
+    header a { color:#cfe9ff; }
+    .scanner { position:relative; width:min(100%,400px); aspect-ratio:1; margin:8px auto;
+               overflow:hidden; border:3px solid #1769aa; border-radius:10px; background:#000; }
+    video { width:100%; height:100%; object-fit:cover; }
+    .controls { padding:0 14px; display:flex; align-items:center; gap:10px; font-size:13px; }
+    input[type=range] { flex:1; }
+    #stats { padding:12px 14px; font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+             white-space:pre-wrap; word-break:break-all; }
+    .ok { color:#6ee7a8; } .bad { color:#ff8a8a; } .warn { color:#ffd479; }
+    canvas { display:none; }
+  </style>
+</head>
+<body>
+  <header>QR 诊断 v2 · <a href="/static/testqr.png" target="_blank">打开测试二维码</a>（用另一块屏幕显示）</header>
+  <div class="scanner"><video id="video" autoplay playsinline muted></video></div>
+  <div class="controls">
+    <span>变焦</span><input id="zoom" type="range" min="1" max="1" step="0.1" value="1"><span id="zoomv">-</span>
+  </div>
+  <div id="stats">正在启动…</div>
+  <canvas id="c0"></canvas><canvas id="c1"></canvas><canvas id="c2"></canvas>
+
+  <script src="/static/jsQR.js"></script>
+  <script>
+  const video = document.getElementById("video");
+  const stats = document.getElementById("stats");
+  const zoomEl = document.getElementById("zoom");
+  const zoomV = document.getElementById("zoomv");
+  const cv = [0,1,2].map(i => {
+    const c = document.getElementById("c" + i);
+    return { c, ctx: c.getContext("2d", { willReadFrequently: true }) };
+  });
+
+  const S = {
+    libLoaded: !!window.jsQR, cameraErr: "", readyStates: {}, res: "", caps: {}, track: {},
+    frames: 0, attempts: 0, hit: { full: 0, crop: 0, half: 0 }, lastMs: {},
+    decoded: "", decodedBy: "", modulePx: 0, focusApplied: "-"
+  };
+
+  function grab(slot, sx, sy, sw, sh, dw, dh) {
+    const { c, ctx } = cv[slot];
+    if (c.width !== dw || c.height !== dh) { c.width = dw; c.height = dh; }
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
+    return ctx.getImageData(0, 0, dw, dh);
+  }
+
+  function tryDecode(img, key) {
+    const t0 = performance.now();
+    const r = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+    S.lastMs[key] = Math.round(performance.now() - t0);
+    if (r && r.data) {
+      S.hit[key]++; S.decoded = r.data.slice(0, 90); S.decodedBy = key;
+      // finder pattern corners give us the real module size that reached the decoder
+      const p = r.location.topLeftCorner, q = r.location.topRightCorner;
+      const span = Math.hypot(q.x - p.x, q.y - p.y);
+      const scale = img.width / (key === "full" ? video.videoWidth : Math.min(video.videoWidth, video.videoHeight));
+      S.modulePx = +(span / 25 / scale).toFixed(2); // finder-to-finder ~ (modules-7)
+      return r;
+    }
+    return null;
+  }
+
+  function tick() {
+    S.frames++;
+    S.readyStates[video.readyState] = (S.readyStates[video.readyState] || 0) + 1;
+
+    if (video.readyState >= 2 && video.videoWidth) {
+      const w = video.videoWidth, h = video.videoHeight;
+      S.res = w + "x" + h;
+      S.attempts++;
+      const side = Math.min(w, h);
+      const cx = (w - side) / 2, cy = (h - side) / 2;
+
+      // 1. production today: whole frame at native resolution
+      tryDecode(grab(0, 0, 0, w, h, w, h), "full");
+      // 2. centre square — the region object-fit:cover actually shows the user
+      tryDecode(grab(1, cx, cy, side, side, side, side), "crop");
+      // 3. centre HALF square, upscaled — a software 2x "zoom" on the aiming area
+      const half = side / 2;
+      tryDecode(grab(2, (w - half) / 2, (h - half) / 2, half, half, side, side), "half");
+    }
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  function render() {
+    const rs = Object.entries(S.readyStates).map(([k, v]) => k + ":" + v).join(" ");
+    const cls = n => n > 0 ? "ok" : "bad";
+    stats.innerHTML =
+      `分辨率      : <span class="${(Math.min(...(S.res.split("x").map(Number)))>=1440)?"ok":"warn"}">${S.res}</span>  (短边越大越好)\n` +
+      `相机能力    : ${JSON.stringify(S.caps)}\n` +
+      `当前 track  : ${JSON.stringify(S.track)}\n` +
+      `readyState  : ${rs}\n` +
+      `对焦设置    : <span class="${/ok$/.test(S.focusApplied)?"ok":"bad"}">${S.focusApplied}</span>\n` +
+      `帧/解码     : ${S.frames} / ${S.attempts}\n` +
+      `\n命中次数:\n` +
+      `  全帧(线上)      : <span class="${cls(S.hit.full)}">${String(S.hit.full).padStart(4)}</span>  ${S.lastMs.full||0}ms\n` +
+      `  中心方形裁剪    : <span class="${cls(S.hit.crop)}">${String(S.hit.crop).padStart(4)}</span>  ${S.lastMs.crop||0}ms\n` +
+      `  中心半幅(软2x)  : <span class="${cls(S.hit.half)}">${String(S.hit.half).padStart(4)}</span>  ${S.lastMs.half||0}ms\n` +
+      `\n每模块像素  : <span class="${S.modulePx>=5?"ok":"warn"}">${S.modulePx || "?"}</span> px  (低于 4 基本解不出)\n` +
+      `首次解出于  : ${S.decodedBy || "-"}\n` +
+      `解码内容    : ${S.decoded ? '<span class="ok">' + S.decoded + '</span>' : "(还没解出来)"}`;
+  }
+
+  setInterval(() => {
+    navigator.sendBeacon("/diag/log", new Blob([JSON.stringify(S)], { type: "application/json" }));
+  }, 3000);
+
+  (async function start() {
+    try {
+      if (!window.jsQR) throw new Error("jsQR 没加载上");
+      // ask for the highest the device will give: the SHORT axis is what the QR spans
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 3840 }, height: { ideal: 2160 } }
+      });
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+
+      const track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      S.caps = { w: caps.width && caps.width.max, h: caps.height && caps.height.max,
+                 zoom: caps.zoom ? [caps.zoom.min, caps.zoom.max] : "unsupported",
+                 focus: caps.focusMode || "-" };
+      if (caps.zoom) {
+        zoomEl.min = caps.zoom.min; zoomEl.max = caps.zoom.max;
+        zoomEl.step = caps.zoom.step || 0.1; zoomEl.value = track.getSettings().zoom || caps.zoom.min;
+        zoomV.textContent = zoomEl.value;
+        zoomEl.oninput = () => {
+          zoomV.textContent = zoomEl.value;
+          track.applyConstraints({ advanced: [{ zoom: +zoomEl.value }] }).catch(() => {});
+        };
+      } else { zoomV.textContent = "不支持"; }
+      if (caps.focusMode && caps.focusMode.includes("continuous")) {
+        S.focusApplied = "tried";
+        for (const c of [{ focusMode: "continuous" }, { advanced: [{ focusMode: "continuous" }] }]) {
+          try {
+            await track.applyConstraints(c);
+            if ((track.getSettings() || {}).focusMode === "continuous") {
+              S.focusApplied = ("advanced" in c) ? "advanced-ok" : "basic-ok";
+              break;
+            }
+            S.focusApplied = ("advanced" in c) ? "advanced-ignored" : "basic-ignored";
+          } catch (e) { S.focusApplied = "reject:" + e.name; }
+        }
+      } else { S.focusApplied = "continuous-unsupported"; }
+      setInterval(() => { S.track = track.getSettings ? track.getSettings() : {}; }, 1000);
+    } catch (e) {
+      S.cameraErr = e.name + ": " + e.message;
+    }
+    requestAnimationFrame(tick);
+  })();
+  </script>
+</body>
+</html>

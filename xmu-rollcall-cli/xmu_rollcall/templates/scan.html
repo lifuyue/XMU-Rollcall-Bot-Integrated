@@ -50,6 +50,7 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
+      transform-origin: center;
     }
 
     .line {
@@ -82,7 +83,58 @@
     .bl { bottom: 12px; left: 12px; border-bottom-width: 4px; border-left-width: 4px; }
     .br { bottom: 12px; right: 12px; border-bottom-width: 4px; border-right-width: 4px; }
 
-    #canvas {
+    .tools {
+      width: min(100%, 420px);
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .zoom {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: #33506b;
+    }
+
+    .zoom[hidden] { display: none; }
+
+    .zoom input {
+      flex: 1;
+      accent-color: #1769aa;
+    }
+
+    .zoom b {
+      min-width: 34px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .shot {
+      display: block;
+      padding: 13px;
+      text-align: center;
+      color: #1769aa;
+      background: #fff;
+      border: 1.5px solid #1769aa;
+      border-radius: 9px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .shot input { display: none; }
+
+    .hint {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #62798f;
+    }
+
+    canvas {
       display: none;
     }
 
@@ -127,26 +179,52 @@
   <header>对准二维码，识别后自动回传</header>
   <main>
     <section class="scanner">
-      <video id="video" autoplay playsinline></video>
+      <video id="video" autoplay playsinline muted></video>
       <div class="line"></div>
       <div class="corner tl"></div>
       <div class="corner tr"></div>
       <div class="corner bl"></div>
       <div class="corner br"></div>
     </section>
+    <div class="tools">
+      <div class="zoom" id="zoomRow" hidden>
+        <span>变焦</span>
+        <input id="zoom" type="range" min="1" max="1" step="0.1" value="1">
+        <b id="zoomVal">1x</b>
+      </div>
+      <label class="shot">
+        投影太远扫不到？点这里拍一张
+        <input id="shot" type="file" accept="image/*" capture="environment">
+      </label>
+      <p class="hint" id="hint">拍照用的是系统相机，分辨率和对焦都更好，隔着教室也能拍清。</p>
+    </div>
   </main>
   <canvas id="canvas"></canvas>
   <div id="message"><span class="spinner"></span>正在启动相机...</div>
 
-  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+  <script src="/static/jsQR.js"></script>
   <script>
     const sid = "{{ sid }}";
     const submitUrl = "/submit/" + sid;
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
+    // Repeated getImageData on a GPU-backed canvas stalls on readback every frame.
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const message = document.getElementById("message");
+    const zoomRow = document.getElementById("zoomRow");
+    const zoomEl = document.getElementById("zoom");
+    const zoomVal = document.getElementById("zoomVal");
+    const shotEl = document.getElementById("shot");
+    const hint = document.getElementById("hint");
     let submitted = false;
+    let digitalZoom = 1;  // >1 only when the camera exposes no zoom of its own
+    let zoomTouchedAt = 0;
+    const ZOOM_QUIET_MS = 250;  // stop decoding for this long after a slider move
+
+    // ponytail: two fixed scales, measured to cover every case either one alone misses
+    // (dense 61-module rollcall QR, 1080-2160px sensor, 20-50% of frame). ~28ms a frame.
+    // If a future rollcall QR gets denser still, add a third scale rather than guess one.
+    const SCALES = [1200, 800];
 
     function setMessage(text, state) {
       message.innerHTML = text;
@@ -157,6 +235,44 @@
     function stopCamera() {
       const stream = video.srcObject;
       if (stream) stream.getTracks().forEach(track => track.stop());
+    }
+
+    // Draw a region of `source` at `size`px square and run jsQR over it.
+    function decodeRegion(source, sx, sy, sw, sh, size) {
+      if (canvas.width !== size || canvas.height !== size) {
+        canvas.width = size;
+        canvas.height = size;
+      }
+      ctx.drawImage(source, sx, sy, sw, sh, 0, 0, size, size);
+      const image = ctx.getImageData(0, 0, size, size);
+      const code = jsQR(image.data, image.width, image.height, { inversionAttempts: "dontInvert" });
+      return code && code.data ? code.data : null;
+    }
+
+    // The square the user actually aims with — object-fit: cover shows the centre square.
+    function decodeCentreSquare(source, w, h) {
+      const full = Math.min(w, h);
+      const side = full / digitalZoom;
+      const sx = (w - side) / 2;
+      const sy = (h - side) / 2;
+      // Cropping in shrinks the source, so both scales can clamp to the same target —
+      // decoding that twice buys nothing.
+      let previous = 0;
+      for (const size of SCALES) {
+        const target = Math.min(size, Math.round(side));
+        if (target === previous) continue;
+        previous = target;
+        const text = decodeRegion(source, sx, sy, side, side, target);
+        if (text) return text;
+      }
+      // Blur beats resolution: a tighter crop kept at native pixels reads frames the
+      // downscaled candidates lose — measured as the only one that still resolves a
+      // QR at ~3.5px per module. Pointless once the user has cropped in themselves.
+      if (digitalZoom === 1) {
+        const half = full / 2;
+        return decodeRegion(source, (w - half) / 2, (h - half) / 2, half, half, Math.round(half));
+      }
+      return null;
     }
 
     async function submitQr(text) {
@@ -182,18 +298,148 @@
 
     function tick() {
       if (submitted) return;
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(image.data, image.width, image.height);
-        if (code && code.data) {
-          submitQr(code.data);
+      const dragging = Date.now() - zoomTouchedAt < ZOOM_QUIET_MS;
+      if (!dragging && video.readyState >= video.HAVE_CURRENT_DATA && video.videoWidth) {
+        const text = decodeCentreSquare(video, video.videoWidth, video.videoHeight);
+        if (text) {
+          submitQr(text);
           return;
         }
       }
       requestAnimationFrame(tick);
+    }
+
+    // Still photo from the system camera: full sensor resolution and a real autofocus pass.
+    shotEl.addEventListener("change", () => {
+      const file = shotEl.files && shotEl.files[0];
+      if (!file || submitted) return;
+      setMessage('<span class="spinner"></span>正在识别照片...', null);
+      const img = new Image();
+      img.onload = () => {
+        // A still is sharp, so try the whole photo too, not just the centre square.
+        let text = decodeCentreSquare(img, img.width, img.height);
+        if (!text) {
+          for (const size of SCALES) {
+            text = decodeRegion(img, 0, 0, img.width, img.height, size);
+            if (text) break;
+          }
+        }
+        URL.revokeObjectURL(img.src);
+        if (text) {
+          submitQr(text);
+        } else {
+          setMessage("照片里没认出二维码，靠近些或让二维码占满画面再拍一张。", "error");
+          shotEl.value = "";
+        }
+      };
+      img.onerror = () => {
+        setMessage("照片读取失败，请重试。", "error");
+        shotEl.value = "";
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    function settingsOf(track) {
+      try { return track.getSettings() || {}; } catch (e) { return {}; }
+    }
+
+    // An `advanced` constraint is best-effort: a browser may drop it without a word,
+    // and a HarmonyOS Mate 60 did exactly that — it kept reporting focusMode "manual"
+    // while advertising "continuous" as supported. A basic constraint is required, so
+    // it either takes effect or rejects. Try that first, keep `advanced` as a fallback.
+    async function applyContinuousFocus(track, caps) {
+      if (!caps.focusMode || caps.focusMode.indexOf("continuous") === -1) return false;
+      for (const constraint of [{ focusMode: "continuous" }, { advanced: [{ focusMode: "continuous" }] }]) {
+        try {
+          await track.applyConstraints(constraint);
+          if (settingsOf(track).focusMode === "continuous") return true;
+        } catch (e) { /* try the next form */ }
+      }
+      return false;
+    }
+
+    function useHardwareZoom(track, caps) {
+      const min = caps.zoom.min;
+      const max = caps.zoom.max;
+      const step = caps.zoom.step || 0;
+      zoomEl.min = min;
+      zoomEl.max = max;
+      // Let the slider itself move freely. Binding it to the camera's reported step
+      // makes the control notchy when a device quantises coarsely; snap to that step
+      // only on the value handed to applyConstraints.
+      zoomEl.step = "any";
+      const now = settingsOf(track).zoom || min;
+      zoomEl.value = now;
+      zoomVal.textContent = (+now).toFixed(1) + "x";
+
+      // `input` fires on every pixel of a drag, and applyConstraints reconfigures the
+      // camera. Firing one per event queues dozens of reconfigurations behind each
+      // other and the preview lags seconds behind the finger. Keep one in flight and
+      // always apply the newest value once it lands.
+      let pending = null;
+      let applying = false;
+
+      async function pump() {
+        if (applying || pending === null) return;
+        applying = true;
+        const value = pending;
+        pending = null;
+        try {
+          await track.applyConstraints({ zoom: value });
+        } catch (e) {
+          try { await track.applyConstraints({ advanced: [{ zoom: value }] }); } catch (e2) {}
+        }
+        applying = false;
+        pump();
+      }
+
+      zoomEl.addEventListener("input", () => {
+        const raw = +zoomEl.value;
+        zoomVal.textContent = raw.toFixed(1) + "x";
+        const snapped = step ? min + Math.round((raw - min) / step) * step : raw;
+        pending = Math.min(max, Math.max(min, snapped));
+        pump();
+      });
+    }
+
+    // No camera zoom at all (HarmonyOS WebView reports no zoom capability). Crop into
+    // the frame instead. It adds no pixels, so it is weaker than the real thing, but
+    // it does let the user fill the decode buffer with the QR from across a room.
+    function useDigitalZoom() {
+      zoomEl.min = 1;
+      zoomEl.max = 3;
+      zoomEl.step = 0.5;
+      zoomEl.value = 1;
+      zoomVal.textContent = "1x";
+      zoomEl.addEventListener("input", () => {
+        digitalZoom = +zoomEl.value;
+        zoomVal.textContent = digitalZoom.toFixed(1) + "x";
+        video.style.transform = "scale(" + digitalZoom + ")";
+      });
+    }
+
+    async function setupTrack(stream) {
+      const track = stream.getVideoTracks()[0];
+      if (!track) return;
+      let caps = {};
+      try { caps = (track.getCapabilities && track.getCapabilities()) || {}; } catch (e) { caps = {}; }
+
+      // jsQR is synchronous and holds the main thread for 50-200ms a frame, which is
+      // also the thread the slider's touch events run on — dragging it while decoding
+      // feels like it is snagging. Yield the thread while the finger is down. A
+      // timestamp rather than pointerup/down so a dropped event cannot wedge it off.
+      zoomEl.addEventListener("input", () => { zoomTouchedAt = Date.now(); });
+
+      if (caps.focusMode && !(await applyContinuousFocus(track, caps))) {
+        hint.textContent = "这台设备的相机停在手动对焦，画面容易发虚。扫不到就直接用上面的拍照。";
+      }
+
+      if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+        useHardwareZoom(track, caps);
+      } else {
+        useDigitalZoom();
+      }
+      zoomRow.hidden = false;
     }
 
     async function start() {
@@ -201,18 +447,24 @@
         if (!window.jsQR) {
           throw new Error("二维码识别库加载失败，请刷新页面。");
         }
+        // Ask for the most the sensor will give. A phone held upright reports portrait,
+        // so an "ideal 1920x1080" lands 1920 on the LONG axis and leaves only 1080 across
+        // the QR — measured too few pixels per module to decode a rollcall QR at
+        // classroom distance.
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
+            width: { ideal: 3840 },
+            height: { ideal: 2160 }
           }
         });
         video.srcObject = stream;
-        setMessage("请对准二维码扫描", null);
+        await video.play().catch(() => {});
+        await setupTrack(stream);
+        setMessage("请对准二维码扫描，扫不到就用下方拍照", null);
         requestAnimationFrame(tick);
       } catch (error) {
-        setMessage("无法访问相机：" + error.message, "error");
+        setMessage("无法访问相机：" + error.message + "（可改用下方拍照识别）", "error");
       }
     }
 
