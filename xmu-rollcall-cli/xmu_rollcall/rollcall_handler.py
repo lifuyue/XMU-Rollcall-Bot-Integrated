@@ -1,7 +1,8 @@
 import time
 from .notifier import build_notifier
 from .qr_handler import handle_qr_rollcall
-from .verify import send_code, send_radar
+from .verify import send_code
+from .radar_campaign import run_radar_campaign as send_radar
 
 def process_rollcalls(data, session, account=None, attendance_guard=None):
     """处理签到数据"""
@@ -87,7 +88,11 @@ def handle_rollcalls(data, session, account=None, attendance_guard=None):
                 if not decision.allowed:
                     continue
                 if rollcalls[i]['is_radar']:
-                    success = send_radar(session, rollcalls[i]['rollcall_id'])
+                    success = send_radar(
+                        session, rollcalls[i]['rollcall_id'], account_id=(account or {}).get("id"),
+                        student_id=decision.student_id, course_id=rollcalls[i].get("course_id"),
+                        end_time=decision.end_time,
+                    )
                     rollcall_type = "Radar"
                 else:
                     success = send_code(session, rollcalls[i]['rollcall_id'], decision.number_code)

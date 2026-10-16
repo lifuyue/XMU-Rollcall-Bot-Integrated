@@ -1,4 +1,4 @@
-"""Read timetable attendance and gate automatic number/radar submissions."""
+"""Read attendance rosters and gate automatic number/radar submissions."""
 
 import re
 import threading
@@ -13,9 +13,8 @@ from .utils import load_session
 
 BASE_URL = "https://lnt.xmu.edu.cn"
 REQUEST_TIMEOUT = (5, 12)
-CAMPUS_TIMEZONE = timezone(timedelta(hours=8))
 MIN_ATTENDEES = 10
-MIN_PERCENT = 50
+MIN_PERCENT = 30
 ATTENDED_STATUSES = {"on_call", "on_call_fine"}
 
 
@@ -29,6 +28,8 @@ class AttendanceDecision:
     complete: bool = False
     message: str = ""
     number_code: str = ""
+    student_id: str = ""
+    end_time: str = None
 
 
 def _id(value):
@@ -104,12 +105,28 @@ class AttendanceGuard:
         course_id = _id(rollcall.get("course_id"))
         rollcall_id = _id(rollcall.get("rollcall_id"))
         event_time = rollcall.get("rollcall_time") or rollcall.get("created_at")
+        if rollcall.get("is_radar"):
+            # Radar discovery can contain rollcalls absent from timetable results.
+            record = _get_json(session, f"/api/rollcall/{rollcall_id}")
+            if _id(record.get("id")) != rollcall_id:
+                raise AttendanceDataError("rollcall ID does not match discovery")
+            if _id(record.get("course_id")) != course_id:
+                raise AttendanceDataError("course does not match the detected rollcall")
+            if record.get("is_radar") is not True:
+                raise AttendanceDataError("rollcall type does not match discovery")
+            record_time = _timestamp(record.get("rollcall_time") or record.get("created_at"))
+            if (event_time and record_time.astimezone(timezone.utc).date() !=
+                    _timestamp(event_time).astimezone(timezone.utc).date()):
+                raise AttendanceDataError("rollcall date does not match discovery")
+            return record
+        # The timetable endpoint keys rollcalls by the UTC calendar date of
+        # rollcall_time, not the campus-local date, so derive the query date in UTC.
         if event_time:
-            dates = [_timestamp(event_time).astimezone(CAMPUS_TIMEZONE).date()]
+            dates = [_timestamp(event_time).astimezone(timezone.utc).date()]
         else:
-            today = now.astimezone(CAMPUS_TIMEZONE).date()
+            today = now.astimezone(timezone.utc).date()
             # Discovery does not always include the start time. Exact ID matching
-            # permits an active rollcall to survive the campus midnight boundary.
+            # permits an active rollcall to survive the midnight (UTC) boundary.
             dates = [today, today - timedelta(days=1)]
         for day in dates:
             data = _get_json(session, "/api/timetable_rollcalls", params={
@@ -130,7 +147,7 @@ class AttendanceGuard:
             if not isinstance(course, dict) or _id(course.get("id")) != course_id:
                 raise AttendanceDataError("course does not match the detected rollcall")
             record_time = record.get("rollcall_time") or record.get("created_at")
-            if _timestamp(record_time).astimezone(CAMPUS_TIMEZONE).date() != day:
+            if _timestamp(record_time).astimezone(timezone.utc).date() != day:
                 raise AttendanceDataError("rollcall date does not match the request")
             return record
         raise AttendanceDataError("detected rollcall is absent from timetable results")
@@ -190,4 +207,5 @@ class AttendanceGuard:
         number_code = record.get("number_code") if is_number else ""
         if is_number and not valid_number_code(number_code):
             return AttendanceDecision(message=f"Waiting: number code is unavailable. {summary}")
-        return AttendanceDecision(allowed=True, message=f"Threshold met. {summary}", number_code=number_code)
+        return AttendanceDecision(allowed=True, message=f"Threshold met. {summary}", number_code=number_code,
+                                  student_id=own_student_id, end_time=record.get("end_time"))

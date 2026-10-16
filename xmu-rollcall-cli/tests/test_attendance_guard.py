@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from attendance_fixtures import ACCOUNT, detected, response, session_for, timetable
+from attendance_fixtures import ACCOUNT, detected, radar_detail, response, session_for, timetable
 from xmu_rollcall.attendance_guard import AttendanceGuard, REQUEST_TIMEOUT
 
 
@@ -21,14 +21,14 @@ class AttendanceGuardTest(unittest.TestCase):
         return result
 
     def test_requires_both_ratio_and_count_including_exact_boundary(self):
-        for attended, total, allowed in [(10, 20, True), (9, 18, False), (10, 21, False),
-                                          (11, 21, True), (9, 9, False), (0, 0, False)]:
+        for attended, total, allowed in [(10, 33, True), (9, 18, False), (10, 34, False),
+                                          (12, 40, True), (11, 40, False), (9, 9, False), (0, 0, False)]:
             with self.subTest(attended=attended, total=total):
                 self.assertEqual(self.check(timetable(attended, total)).allowed, allowed)
 
     def test_excludes_every_managed_student_from_both_counts(self):
         for signed, total, other_status, expected in [
-            (10, 20, "absent", True), (9, 18, "on_call", False), (10, 21, "on_call", False),
+            (10, 33, "absent", True), (9, 18, "on_call", False), (10, 34, "on_call", False),
         ]:
             with self.subTest(signed=signed, total=total, other_status=other_status):
                 managed = [{"student_id": 900, "status": "absent"},
@@ -84,12 +84,12 @@ class AttendanceGuardTest(unittest.TestCase):
                 result = AttendanceGuard([1]).check(session_for(records), detected(), ACCOUNT, now=NOW)
                 self.assertFalse(result.allowed)
 
-    def test_uses_campus_date_even_when_utc_is_previous_day(self):
+    def test_uses_utc_date_even_when_campus_is_next_day(self):
         moment = "2026-10-12T17:00:00Z"
         session = session_for([timetable(rollcall_time=moment)])
         result = AttendanceGuard([1]).check(session, detected(created_at=moment), ACCOUNT, now=NOW)
         self.assertTrue(result.allowed)
-        self.assertEqual(session.get.call_args.kwargs["params"]["rollcall_date"], "2026-10-13")
+        self.assertEqual(session.get.call_args.kwargs["params"]["rollcall_date"], "2026-10-12")
 
     def test_missing_discovery_timestamp_checks_previous_day_by_exact_id(self):
         session = session_for()
@@ -139,10 +139,85 @@ class AttendanceGuardTest(unittest.TestCase):
         self.assertFalse(self.check(rollcall=detected(course_id=None)).allowed)
 
     def test_radar_has_same_threshold_and_does_not_require_number_code(self):
-        for attended, expected in [(9, False), (10, True)]:
-            result = self.check(timetable(attended, is_number=False, number_code=None),
-                                detected(is_number=False, is_radar=True))
-            self.assertEqual(result.allowed, expected)
+        for attended, total, expected in [(9, 18, False), (10, 33, True), (10, 34, False),
+                                          (12, 40, True), (11, 40, False), (9, 9, False), (0, 0, False)]:
+            with self.subTest(attended=attended, total=total):
+                session = session_for([], radar_record=radar_detail(attended, total))
+                result = AttendanceGuard([1]).check(
+                    session, detected(is_number=False, is_radar=True), ACCOUNT, now=NOW,
+                )
+                self.assertEqual(result.allowed, expected)
+                self.assertEqual(result.number_code, "")
+                self.assertEqual([c.args[0] for c in session.get.call_args_list], [
+                    "https://lnt.xmu.edu.cn/api/profile", "https://lnt.xmu.edu.cn/api/rollcall/123",
+                ])
+                for call in session.get.call_args_list:
+                    self.assertEqual(call.kwargs["timeout"], REQUEST_TIMEOUT)
+                session.put.assert_not_called()
+
+    def test_radar_excludes_all_managed_students_from_both_counts(self):
+        for signed, total, status, expected in [(10, 33, "absent", True),
+                                               (9, 18, "on_call_fine", False),
+                                               (10, 34, "on_call_fine", False)]:
+            with self.subTest(signed=signed):
+                managed = [{"student_id": 900, "status": "absent"},
+                           {"student_id": 901, "status": status}]
+                session = session_for([], radar_record=radar_detail(signed, total, managed))
+                other = MagicMock()
+                other.__enter__.return_value = other
+                other.get.return_value = response({"id": 901})
+                with patch("xmu_rollcall.attendance_guard.requests.Session", return_value=other), \
+                        patch("xmu_rollcall.attendance_guard.load_session", return_value=True):
+                    result = AttendanceGuard([1, 2]).check(
+                        session, detected(is_number=False, is_radar=True), ACCOUNT, now=NOW,
+                    )
+                self.assertEqual(result.allowed, expected)
+                self.assertIn(f"{signed}/{total}", result.message)
+
+    def test_radar_rejects_wrong_identity_type_and_invalid_metadata(self):
+        for changes in [{"id": 456}, {"id": None}, {"course_id": 43}, {"course_id": None},
+                        {"is_radar": False}, {"is_radar": None}, {"is_radar": 1},
+                        {"is_number": True}, {"is_number": 0}, {"status": "unknown"},
+                        {"rollcall_time": "bad"}, {"end_time": "bad"},
+                        {"rollcall_time": "2026-10-12T02:00:00Z"}]:
+            with self.subTest(changes=changes):
+                session = session_for([], radar_record=radar_detail(**changes))
+                result = AttendanceGuard([1]).check(
+                    session, detected(is_number=False, is_radar=True), ACCOUNT, now=NOW,
+                )
+                self.assertFalse(result.allowed)
+                self.assertFalse(result.complete)
+
+    def test_radar_keeps_expiry_self_status_and_roster_checks(self):
+        good = radar_detail()["student_rollcalls"]
+        for changes, complete in [
+            ({"status": "finished"}, True), ({"end_time": NOW.isoformat()}, True),
+            ({"student_rollcalls": [{"student_id": 900, "status": "on_call_fine"}] + good[1:]}, True),
+            ({"student_rollcalls": [{"student_id": 900, "status": "pending"}] + good[1:]}, False),
+            ({"student_rollcalls": None}, False), ({"student_rollcalls": []}, False),
+            ({"student_rollcalls": good[1:]}, False), ({"student_rollcalls": good + [good[1]]}, False),
+        ]:
+            with self.subTest(changes=changes):
+                session = session_for([], radar_record=radar_detail(**changes))
+                result = AttendanceGuard([1]).check(
+                    session, detected(is_number=False, is_radar=True), ACCOUNT, now=NOW,
+                )
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.complete, complete)
+
+    def test_radar_api_failure_does_not_cache_allowance_and_recovers(self):
+        for failure in [requests.Timeout(), requests.HTTPError(), ValueError(), response({}), response([])]:
+            with self.subTest(failure=failure):
+                session = session_for([], radar_record=radar_detail())
+                guard = AttendanceGuard([1])
+                rollcall = detected(is_number=False, is_radar=True)
+                self.assertTrue(guard.check(session, rollcall, ACCOUNT, now=NOW).allowed)
+                session.get.side_effect = [failure, response(radar_detail(attended=9)), response(radar_detail())]
+                decision = guard.check(session, rollcall, ACCOUNT, now=NOW)
+                self.assertFalse(decision.allowed)
+                self.assertFalse(decision.complete)
+                self.assertFalse(guard.check(session, rollcall, ACCOUNT, now=NOW).allowed)
+                self.assertTrue(guard.check(session, rollcall, ACCOUNT, now=NOW).allowed)
 
     def test_missing_and_invalid_number_codes_block(self):
         for code in [None, "", 1234, "12", "12345", "abcd", "１２３４"]:

@@ -4,14 +4,22 @@ import itertools
 import unittest
 from unittest.mock import MagicMock, patch
 
-from attendance_fixtures import ACCOUNT, detected, response, session_for, timetable
+from attendance_fixtures import ACCOUNT, detected, radar_detail, response, session_for, timetable
 from xmu_rollcall.attendance_guard import AttendanceGuard
 from xmu_rollcall.monitor import start_monitor
 from xmu_rollcall.multi_monitor import MultiAccountMonitor
+from xmu_rollcall.verify import send_radar
+
+
+def direct_radar_for_test(session, rollcall_id, **kwargs):
+    """Exercise the real submission logic without spawning a child or opening a session."""
+    kwargs.pop("account_id", None)
+    with patch("xmu_rollcall.verify.time.monotonic", return_value=1000):
+        return send_radar(session, rollcall_id, **kwargs)
 
 
 def polling_session(radar=False, interrupt_after=None):
-    session = session_for()
+    session = session_for([] if radar else None)
     data = {"rollcalls": [detected(is_radar=radar, is_number=not radar)]}
     original_get = session.get.side_effect
     polls = 0
@@ -24,10 +32,12 @@ def polling_session(radar=False, interrupt_after=None):
             if interrupt_after and polls > interrupt_after:
                 raise KeyboardInterrupt
             return response(data)
-        if url.endswith("/api/timetable_rollcalls"):
+        if radar and url.endswith("/api/rollcall/123"):
             rosters += 1
-            return response({"rollcalls": [timetable(9 if rosters == 1 else 10,
-                                                    is_number=not radar)]})
+            return response(radar_detail(9 if rosters == 1 else 10))
+        if not radar and url.endswith("/api/timetable_rollcalls"):
+            rosters += 1
+            return response({"rollcalls": [timetable(9 if rosters == 1 else 10)]})
         return original_get(url, **kwargs)
 
     session.get.side_effect = get
@@ -46,6 +56,7 @@ class AttendanceMonitorTest(unittest.TestCase):
                 clock = itertools.count(step=10)
                 with patch("xmu_rollcall.multi_monitor.authenticate_account", return_value=session), \
                         patch("xmu_rollcall.multi_monitor.time.monotonic", side_effect=lambda: next(clock)), \
+                        patch("xmu_rollcall.rollcall_handler.send_radar", side_effect=direct_radar_for_test), \
                         patch("xmu_rollcall.rollcall_handler.build_notifier") as notifier:
                     monitor._run_account(ACCOUNT, 0)
                 session.put.assert_called_once()
@@ -54,8 +65,9 @@ class AttendanceMonitorTest(unittest.TestCase):
                 if not radar:
                     self.assertEqual(session.put.call_args.kwargs["json"]["numberCode"], "0034")
                 notifier.return_value.send_rollcall_success.assert_called_once()
-                self.assertEqual(sum(c.args[0].endswith("/api/timetable_rollcalls")
-                                     for c in session.get.call_args_list), 2)
+                roster_path = "/api/rollcall/123" if radar else "/api/timetable_rollcalls"
+                self.assertEqual(sum(c.args[0].endswith(roster_path)
+                                     for c in session.get.call_args_list), 3 if radar else 2)
 
     def test_handler_exception_does_not_poison_poll_cache(self):
         session = polling_session()

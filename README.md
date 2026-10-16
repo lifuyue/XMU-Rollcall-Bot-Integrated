@@ -63,21 +63,68 @@ Successful number, radar, and QR answers all emit a success notification.
 
 ## Attendance Threshold
 
-Number and radar submissions require **at least 50% and at least 10 other students**
+Number and radar submissions require **at least 30% and at least 10 other students**
 to have attended. All complete configured accounts are excluded from both counts,
 including accounts omitted by `--account-id`. Student identities are verified with
 `/api/profile`; an unresolved managed account blocks automatic submission until its
 cached session is valid. Only `on_call` and `on_call_fine` count as attended.
 
-After discovery, `/api/timetable_rollcalls?course_ids=<course_id>&rollcall_date=<yyyy-mm-dd>`
-supplies the attendance roster and number code. Records must match the course ID,
-campus date (UTC+8), and rollcall ID. The old number-code lookup is no longer used.
+For number rollcalls, `/api/timetable_rollcalls?course_ids=<course_id>&rollcall_date=<yyyy-mm-dd>`
+supplies the attendance roster and code, matched by course ID, UTC date, and rollcall ID.
+Radar rollcalls read their roster from `/api/rollcall/<rollcall_id>` and verify the
+rollcall ID, course ID, radar type, and timestamps, since timetable results may omit
+radar rollcalls. Both sources use the same attendance threshold below.
 Pending rollcalls are checked again each poll, even when discovery data is unchanged.
 Submission proceeds immediately once both thresholds are met, without an extra delay.
 Finished/expired rollcalls are skipped; API failures, missing data, duplicate student
 IDs, and unavailable codes block submission. Counts and allow decisions are never cached.
 Classes with fewer than 10 other students cannot pass the threshold. QR scanning
 and success notifications retain their existing behavior; waiting reasons are logged.
+
+Each account gets one radar campaign per rollcall, after the attendance threshold
+passes. Its **60-second total budget includes the original distance method**, status
+queries, fixed-location submissions, and the one-second pause between search rounds;
+waiting for the attendance threshold does not count. The original probes and circle
+intersections run once, with a **10-second hard limit from the start of the distance
+phase**, including its status GETs and answer PUTs. Failures such as missing distance
+or non-intersecting circles switch to fallback immediately. If the 10-second limit
+expires, terminate the distance worker first, then use the remaining 60-second total
+budget for at most two fixed-location search rounds. Neither transition resets the
+total budget or the persisted campaign claim. Each round first
+tries the three centers in order: **latitude 24.6082, longitude 118.2953**;
+**latitude 24.6087, longitude 118.3090**; **latitude 24.6075, longitude 118.2950**
+(24°36′27″ N, 118°17′42″ E). Then try each center's east, south, west, and north
+points 100 metres away, in center order. Each of the 15 points is tried once per
+round. Preserve the centers' four decimals and full computed precision for offsets.
+The maximum is 30 fallback PUTs plus four original-method PUTs, subject to the budget.
+
+Before every PUT, query the rollcall detail and verify the activity and own attendance.
+Stop on HTTP 200, an already-attended status, a finished/expired activity, unverifiable
+status, HTTP 401/429, total-budget expiry, or exhausted rounds. Fixed responses need no
+distance or JSON body. The payload fields and attendance thresholds are unchanged;
+request timeouts shrink to the remaining phase and total budgets. Distance and fallback
+work run in spawned child processes that are terminated at their deadlines, including
+when DNS or a slow response blocks requests. A request already received by the server
+cannot be recalled.
+
+Claims are atomically persisted in `~/.xmu_rollcall/radar_attempts.json` before starting
+the first child. Later polls and service restarts never restart a claimed campaign, including
+one interrupted mid-flight. Failure to save the claim prevents submission. The persistent
+lock requires POSIX `fcntl` (Linux/macOS); unsupported platforms stop without submitting.
+
+Radar submission emits `[Radar]` JSON diagnostics with the rollcall ID, account
+worker (for example `xmu-account-1`), probe/candidate/fixed attempt, round, processing phase, and
+HTTP status (`null` when no response arrived). Exceptions include their concrete
+type and a fixed reason; JSON errors include line/column, and distance errors
+include field types. Request errors, malformed JSON, missing/invalid distance,
+non-intersecting circles, and rejected candidates can be distinguished without
+logging raw exception text, response bodies, cookies, device IDs, or coordinates.
+Non-200 probe responses may carry valid distances; check subsequent `exception`
+or `failed` events before treating them as failures. A `fallback_start` event marks
+the switch to fixed locations; `fixed_1/2/3` identify centers, and direction suffixes
+such as `fixed_1_east` identify offsets. `status_response`, `round_start/round_end`,
+`success`, and `stopped` identify status checks, rounds, and termination. Campaign
+logs separately identify the persisted claim and process timeout without logging secrets.
 
 ## Multi-Account Monitoring
 

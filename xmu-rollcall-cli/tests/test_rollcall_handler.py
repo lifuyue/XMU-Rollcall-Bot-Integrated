@@ -1,8 +1,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from attendance_fixtures import ACCOUNT, detected, radar_detail, session_for
 from xmu_rollcall.rollcall_handler import handle_rollcalls
-from xmu_rollcall.attendance_guard import AttendanceDecision
+from xmu_rollcall.attendance_guard import AttendanceDecision, AttendanceGuard
 
 
 def rollcall(**overrides):
@@ -125,6 +126,31 @@ class RollcallHandlerTest(unittest.TestCase):
         self.assertEqual(forwarded["created_at"], "2026-10-13T02:00:00Z")
         self.assertEqual(guard.check.call_args.kwargs["account"], account)
         code.assert_called_once_with(session, 123, "0034")
+
+    def test_radar_campaign_receives_verified_identity_course_and_end_time(self):
+        end_time = "2099-01-01T00:00:00Z"
+        session = session_for([], radar_record=radar_detail(end_time=end_time))
+        with patch("xmu_rollcall.rollcall_handler.build_notifier"), \
+                patch("xmu_rollcall.rollcall_handler.send_radar", return_value=True) as radar:
+            result = handle_rollcalls({"rollcalls": [detected(is_radar=True, is_number=False)]},
+                                      session, ACCOUNT, AttendanceGuard([1]))
+        self.assertEqual(result, [True])
+        radar.assert_called_once()
+        self.assertEqual(radar.call_args.args, (session, 123))
+        self.assertEqual(radar.call_args.kwargs["account_id"], 1)
+        self.assertEqual(str(radar.call_args.kwargs["student_id"]), "900")
+        self.assertEqual(radar.call_args.kwargs["course_id"], 42)
+        self.assertEqual(radar.call_args.kwargs["end_time"], end_time)
+
+    def test_failed_or_stopped_radar_campaign_does_not_notify_success(self):
+        session = session_for([], radar_record=radar_detail())
+        with patch("xmu_rollcall.rollcall_handler.build_notifier") as notifier, \
+                patch("xmu_rollcall.rollcall_handler.send_radar", return_value=False) as radar:
+            result = handle_rollcalls({"rollcalls": [detected(is_radar=True, is_number=False)]},
+                                      session, ACCOUNT, AttendanceGuard([1]))
+        self.assertEqual(result, [False])
+        radar.assert_called_once()
+        notifier.return_value.send_rollcall_success.assert_not_called()
 
 
 if __name__ == "__main__":
