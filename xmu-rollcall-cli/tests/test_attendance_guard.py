@@ -84,12 +84,14 @@ class AttendanceGuardTest(unittest.TestCase):
                 result = AttendanceGuard([1]).check(session_for(records), detected(), ACCOUNT, now=NOW)
                 self.assertFalse(result.allowed)
 
-    def test_uses_campus_date_even_when_utc_is_previous_day(self):
+    def test_queries_utc_date_of_rollcall_time(self):
+        # The timetable keys rollcalls by the UTC date of rollcall_time; a 17:00Z
+        # start is filed under 10-12 even though campus-local time is already 10-13.
         moment = "2026-10-12T17:00:00Z"
         session = session_for([timetable(rollcall_time=moment)])
         result = AttendanceGuard([1]).check(session, detected(created_at=moment), ACCOUNT, now=NOW)
         self.assertTrue(result.allowed)
-        self.assertEqual(session.get.call_args.kwargs["params"]["rollcall_date"], "2026-10-13")
+        self.assertEqual(session.get.call_args.kwargs["params"]["rollcall_date"], "2026-10-12")
 
     def test_missing_discovery_timestamp_checks_previous_day_by_exact_id(self):
         session = session_for()
